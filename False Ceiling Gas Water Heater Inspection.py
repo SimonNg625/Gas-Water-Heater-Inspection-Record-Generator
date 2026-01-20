@@ -31,12 +31,11 @@ def create_embedded_template(save_path):
 
     doc.save(save_path)
 
-def parse_filename_flexible(filename):
+def parse_filename_with_zeros(filename):
     """
-    Parses filenames with variable formats:
-    5 parts: Project-Tower-Flat-Inspector-Date
-    4 parts: Project-Flat-Inspector-Date (Tower is empty)
-    3 parts: Project-Inspector-Date (Tower & Flat empty)
+    Parses filenames using the '0' rule.
+    Format: Project-Tower-Flat-Inspector-Date
+    Rule: If Tower or Flat is '0', treat it as empty.
     """
     base_name = os.path.splitext(filename)[0]
     # Remove counters like " (2)"
@@ -44,33 +43,31 @@ def parse_filename_flexible(filename):
     parts = clean_name.split('-')
     
     # Initialize defaults
-    project = parts[0]
+    project = ""
     tower = ""
     flat = ""
     inspector = ""
     date = ""
     
-    # Logic based on number of parts detected
+    # Logic: We expect at least 5 parts (Project, Tower, Flat, Inspector, Date)
     if len(parts) >= 5:
-        # Standard: Project-Tower-Flat-Inspector-Date
-        tower = parts[1]
-        flat = parts[2]
+        project = parts[0]
+        
+        # --- THE 0 RULE ---
+        # If part is '0', set to empty string, otherwise keep the text
+        tower_raw = parts[1]
+        flat_raw = parts[2]
+        
+        tower = "" if tower_raw == '0' else tower_raw
+        flat = "" if flat_raw == '0' else flat_raw
+        
         inspector = parts[3]
-        date = '-'.join(parts[4:])
-    
-    elif len(parts) == 4:
-        # Case: Project-Flat-Inspector-Date (e.g. Independent house with flat number)
-        # We assume the second part is the Flat/Unit
-        flat = parts[1]
-        inspector = parts[2]
-        date = '-'.join(parts[3:])
-        
-    elif len(parts) == 3:
-        # Case: Project-Inspector-Date (e.g. Independent house, no sub-unit)
-        inspector = parts[1]
-        date = '-'.join(parts[2:])
-        
-    # Return as dictionary for easy DataFrame creation
+        date = '-'.join(parts[4:]) # Join remaining parts for date
+    else:
+        # Fallback for filenames that don't match the new standard
+        # We try to grab the first part as project at minimum
+        if len(parts) > 0: project = parts[0]
+
     return {
         "filename": filename,
         "Project": project,
@@ -89,12 +86,16 @@ def main():
     st.title("📝 Gas Water Heater Inspection Record Generator")
     st.markdown("""
     **Instructions:**
-    1. Rename your images. Supported formats:
-       * `Project-Tower-Flat-Inspector-Date` (Standard)
-       * `Project-Flat-Inspector-Date` (Tower left blank)
-       * `Project-Inspector-Date` (Tower & Flat left blank)
-    2. Zip all images and upload.
-    3. **Review the table below** to confirm details before generating.
+    1. Rename your images using this standard format:  
+       `Project-Tower-Flat-Inspector-Date.jpg`
+    2. **The "0" Rule:**
+       * If there is no Tower, put `0`.
+       * If there is no Flat, put `0`.
+    
+    **Examples:**
+    * Standard: `太湖花園-5座-1A-譚大文-20-01-2025`
+    * No Tower: `NKIL-0-1A-陳明-20-01-2025` (Tower becomes empty)
+    * No Tower & No Flat: `147 Waterloo Road-0-0-陳明-20-01-2025` (Both empty)
     """)
 
     # Initialize Session State
@@ -128,7 +129,8 @@ def main():
             for root_dir, dirs, files in os.walk(extract_path):
                 for file in files:
                     if file.lower().endswith(valid_extensions):
-                        record = parse_filename_flexible(file)
+                        # Use the new "0" logic function
+                        record = parse_filename_with_zeros(file)
                         record['full_path'] = os.path.join(root_dir, file)
                         parsed_records.append(record)
             
@@ -143,14 +145,13 @@ def main():
     if st.session_state.processed_data is not None:
         st.divider()
         st.subheader("3. Review & Edit Details")
-        st.info("👇 You can edit the cells below directly. If 'Tower' or 'Flat' is blank, verify that is correct.")
+        st.info("👇 Check the table below. '0' inputs should now be empty cells.")
         
         # Display Editable Table
-        # We hide 'filename' and 'full_path' from the editor but keep them in the dataframe
         edited_df = st.data_editor(
             st.session_state.processed_data,
             column_order=("Project", "Tower", "Flat", "Inspector", "Date"),
-            disabled=["filename"], # Don't let users change the original filename reference
+            disabled=["filename"], 
             num_rows="dynamic",
             use_container_width=True,
             hide_index=True
@@ -168,17 +169,17 @@ def main():
             template_path = os.path.join(temp_dir, "template.docx")
             create_embedded_template(template_path)
             
-            # Group by Unique Location (Project + Tower + Flat)
-            # We iterate through the EDITED dataframe
+            # Group by Unique Location
             grouped = {}
             
             for index, row in edited_df.iterrows():
-                # Create a unique key for grouping (Project-Tower-Flat)
-                # We strip whitespace to handle empty fields cleanly
                 p = row['Project'].strip()
                 t = row['Tower'].strip() if row['Tower'] else ""
                 f = row['Flat'].strip() if row['Flat'] else ""
                 
+                # Create a unique key. 
+                # Note: This key is internal logic only. 
+                # The filename will be generated separately later.
                 key = f"{p}-{t}-{f}"
                 
                 if key not in grouped:
@@ -191,9 +192,6 @@ def main():
                         'images': []
                     }
                 
-                # Retrieve the full path from original data (using index alignment)
-                # Note: This assumes user didn't delete rows. 
-                # Ideally we map by hidden ID, but index works for simple edits.
                 img_path = st.session_state.processed_data.loc[index, 'full_path']
                 grouped[key]['images'].append(img_path)
 
@@ -210,10 +208,13 @@ def main():
                     
                     table.cell(0, 1).text = data['project']
                     
-                    # Combine Tower and Flat smartly
-                    # If Tower is empty, just show Flat. If both present, show "Tower Flat"
-                    location_detail = f"{data['tower']} {data['flat']}".strip()
-                    table.cell(1, 1).text = location_detail
+                    # --- Table Logic: "Tower Flat" ---
+                    # e.g. "5座 1A", or "1A" (if tower empty), or "" (if both empty)
+                    location_parts = []
+                    if data['tower']: location_parts.append(data['tower'])
+                    if data['flat']: location_parts.append(data['flat'])
+                    
+                    table.cell(1, 1).text = " ".join(location_parts)
                     
                     table.cell(2, 1).text = str(data['inspector'])
                     table.cell(3, 1).text = str(data['date'])
@@ -233,8 +234,17 @@ def main():
                         except Exception as e:
                             st.warning(f"Skipped image in {key}: {e}")
                             
-                    # Save
-                    safe_filename = f"{key}.docx".replace('/', '_')
+                    # --- Filename Logic ---
+                    # Join non-empty parts with hyphens
+                    # e.g. ["NKIL", "1A"] -> "NKIL-1A.docx"
+                    # e.g. ["147 Waterloo"] -> "147 Waterloo.docx"
+                    filename_parts = [data['project']]
+                    if data['tower']: filename_parts.append(data['tower'])
+                    if data['flat']: filename_parts.append(data['flat'])
+                    
+                    safe_filename_base = "-".join(filename_parts)
+                    safe_filename = f"{safe_filename_base}.docx".replace('/', '_')
+                    
                     doc.save(os.path.join(output_path, safe_filename))
                     progress_bar.progress((i + 1) / total_groups)
                 
@@ -259,3 +269,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
