@@ -14,7 +14,7 @@ from io import BytesIO
 
 def create_embedded_template(save_path):
     doc = Document()
-    heading = doc.add_heading('Gas Water Heater Inspection Record', level=0)
+    heading = doc.add_heading('Towngas Inspection Record', level=0)
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     table = doc.add_table(rows=4, cols=2)
@@ -269,5 +269,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
