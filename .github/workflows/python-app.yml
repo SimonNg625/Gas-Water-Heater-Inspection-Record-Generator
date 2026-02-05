@@ -29,5 +29,8 @@ jobs:
 
     - name: Run tests with pytest
       run: |
-        # Corrected filename here:
-        pytest --cov=false_ceiling_gas_water_heater_inspection --cov-report=term-missing test_water_heater_inspection.py
+        # Change directory into your project folder
+        cd "Gas Water Heater Inspction Record Generator"
+        
+        # Run the test
+        pytest --cov=app --cov-report=term-missing test_water_heater_inspection.py
