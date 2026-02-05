@@ -1,0 +1,1 @@
+[![Python application](https://github.com/SimonNg625/Gas-Water-Heater-Inspection-Record-Generator/actions/workflows/python-app.yml/badge.svg)](https://github.com/SimonNg625/Gas-Water-Heater-Inspection-Record-Generator/actions/workflows/python-app.yml)
